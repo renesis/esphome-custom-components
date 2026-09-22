@@ -1,3 +1,4 @@
+
 /*
 STMicroelectronic VL53L1X ultra lite driver (STSW-IMG009), VL53L1 API Core
 has been adapted and modified so it functions using the ESPHome component framework.
