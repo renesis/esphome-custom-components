@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cmath>
 #include "esphome/core/component.h"
+#include "esphome/core/hal.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/i2c/i2c.h"
 #ifdef USE_BINARY_SENSOR
@@ -31,6 +33,9 @@ class VL53L1XComponent : public PollingComponent, public i2c::I2CDevice, public 
 
   void setup() override;
   void dump_config() override;
+  // Force a sensor re-initialisation on the next update (e.g. after an
+  // external XSHUT pulse). Safe to call at any time.
+  void request_reinit() { this->initialized_ = false; this->next_init_attempt_ = millis(); }
   void update() override;
   void loop() override;
   float get_setup_priority() const override;
@@ -56,6 +61,13 @@ class VL53L1XComponent : public PollingComponent, public i2c::I2CDevice, public 
     DATAREADY_TIMEOUT,
     BOOT_TIMEOUT,
   } error_code_{NONE};
+
+  // --- runtime recovery (renesis fork) ---
+  bool init_sensor_();
+  bool initialized_{false};
+  bool stale_published_{false};
+  uint32_t last_fresh_ms_{0};
+  uint32_t next_init_attempt_{0};
 
   bool boot_state(uint8_t *state);
   bool clear_interrupt();
