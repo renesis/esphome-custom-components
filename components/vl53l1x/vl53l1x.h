@@ -68,6 +68,7 @@ class VL53L1XComponent : public PollingComponent, public i2c::I2CDevice, public 
   bool stale_published_{false};
   uint32_t last_fresh_ms_{0};
   uint32_t next_init_attempt_{0};
+  uint8_t comm_fail_count_{0};
 
   bool boot_state(uint8_t *state);
   bool clear_interrupt();

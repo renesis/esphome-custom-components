@@ -209,6 +209,7 @@ static const uint16_t TIMING_BUDGET = 500;  // new timing budget is maximum allo
 static const uint16_t LOOP_TIME     =  90;  // loop executes every 90ms
 static const uint32_t STALE_MS        = 5000;   // no fresh reading for this long -> publish unknown + re-init
 static const uint32_t REINIT_INTERVAL = 10000;  // minimum time between re-initialisation attempts
+static const uint8_t  COMM_FAIL_LIMIT = 5;      // consecutive I2C failures before going stale early
 
 // Sensor Initialisation
 bool VL53L1XComponent::init_sensor_() {
@@ -407,7 +408,15 @@ void VL53L1XComponent::loop() {
     return;
   this->last_loop_time_ = now;
 
-  if (!this->check_for_dataready(&is_dataready)) return;
+  if (!this->check_for_dataready(&is_dataready)) {
+    // Sensor not answering on I2C. After a few consecutive failures, go
+    // stale immediately rather than waiting out STALE_MS (and stop
+    // spamming the log with a warning every loop).
+    if (++this->comm_fail_count_ >= COMM_FAIL_LIMIT)
+      this->last_fresh_ms_ = now - STALE_MS - 1;
+    return;
+  }
+  this->comm_fail_count_ = 0;
   if (!is_dataready) return;
 
   // data ready now
@@ -430,16 +439,19 @@ void VL53L1XComponent::update() {
 
   if (!this->initialized_ || stale) {
     // Never republish an old value: report unknown once, then try to recover.
+    // Publish "unknown" on EVERY update while stale, not just once: a
+    // moving-average filter downstream skips NaN and would otherwise keep
+    // showing the last good reading. Repeating it fills the window.
+    if (this->distance_sensor_ != nullptr)
+      this->distance_sensor_->publish_state(NAN);
+    if (this->range_status_sensor_ != nullptr)
+      this->range_status_sensor_->publish_state(NAN);
+#ifdef USE_BINARY_SENSOR
+    if (this->range_valid_binary_sensor_)
+      this->range_valid_binary_sensor_->publish_state(false);
+#endif
     if (!this->stale_published_) {
       ESP_LOGW(TAG, "No fresh reading - publishing unknown and attempting recovery");
-      if (this->distance_sensor_ != nullptr)
-        this->distance_sensor_->publish_state(NAN);
-      if (this->range_status_sensor_ != nullptr)
-        this->range_status_sensor_->publish_state(NAN);
-#ifdef USE_BINARY_SENSOR
-      if (this->range_valid_binary_sensor_)
-        this->range_valid_binary_sensor_->publish_state(false);
-#endif
       this->stale_published_ = true;
       this->status_set_warning();
     }
@@ -452,6 +464,7 @@ void VL53L1XComponent::update() {
         this->error_code_ = NONE;
         this->last_fresh_ms_ = millis();  // grace period for the first reading
         this->last_loop_time_ = 0;
+        this->comm_fail_count_ = 0;
         ESP_LOGI(TAG, "Sensor re-initialised");
       } else {
         this->initialized_ = false;
